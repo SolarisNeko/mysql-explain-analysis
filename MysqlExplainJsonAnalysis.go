@@ -7,12 +7,19 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 )
 
 import (
 	_ "github.com/go-sql-driver/mysql"
 )
+
+// 分析输出结果 file
+const outputAnalysisFileName = "mysql-analysis-output.txt"
+
+// 需要检查的 SQL 文件. 当前目录下
+const checkSqlFileName = "check.sql"
 
 type CostInfo struct {
 	QueryCost       string `json:"query_cost"`
@@ -117,8 +124,8 @@ func main() {
 	defer db.Close()
 
 	// 读取当前目录下的check.sql文件
-	sqlFile := "check.sql"
-	sqlBytes, err := ioutil.ReadFile(sqlFile)
+
+	sqlBytes, err := ioutil.ReadFile(checkSqlFileName)
 	if err != nil {
 		log.Fatal("无法读取check.sql文件：", err)
 	}
@@ -127,6 +134,16 @@ func main() {
 	sqlQuery := string(sqlBytes)
 
 	sqlArray := splitSQLStatements(sqlQuery)
+
+	// 打开文件用于写入结果
+	file, err := os.Create(outputAnalysisFileName)
+	if err != nil {
+		log.Fatal("无法创建结果文件：", err)
+	}
+	defer file.Close()
+
+	// 将标准输出重定向到文件
+	log.SetOutput(file)
 
 	for _, selectSql := range sqlArray {
 
@@ -145,7 +162,7 @@ func main() {
 			}
 		}
 
-		fmt.Printf("执行的 SQL = %s \n", selectSql)
+		fmt.Fprintf(file, "执行的 SQL = %s \n", selectSql)
 
 		// 解析执行计划
 		explainResult, err := parseExplainJSON(explainJSON)
@@ -154,63 +171,78 @@ func main() {
 		}
 
 		// 宏观信息
-		fmt.Println("----------------------------")
-		fmt.Println("执行计划：")
-		fmt.Printf("Select ID: %d\n", explainResult.QueryBlock.SelectID)
-		fmt.Printf("查询耗时(ms) : %s\n", explainResult.QueryBlock.CostInfo.QueryCost)
+		fmt.Fprintf(file, "---------------------------- \n")
+		fmt.Fprintf(file, "执行计划：\n")
+		fmt.Fprintf(file, "Select ID: %d\n", explainResult.QueryBlock.SelectID)
+		fmt.Fprintf(file, "查询耗时(ms) : %s\n", explainResult.QueryBlock.CostInfo.QueryCost)
 
 		// 物理计划执行情况
-		fmt.Println("----------------------------")
-		fmt.Println("表扫描情况:")
-		fmt.Printf("Table Name: %s\n", explainResult.QueryBlock.Table.TableName)
-		fmt.Printf("访问类型 Access Type: %s\n", explainResult.QueryBlock.Table.AccessType)
-		fmt.Printf("扫描的行数 Rows Examined Per Scan: %d\n", explainResult.QueryBlock.Table.RowsExaminedPerScan)
-		fmt.Printf("生产的行数 Rows Produced Per Join: %d\n", explainResult.QueryBlock.Table.RowsProducedPerJoin)
-		fmt.Printf("过滤的百分比 Filtered: %s\n", explainResult.QueryBlock.Table.Filtered)
+		fmt.Fprintf(file, "---------------------------- \n")
+		fmt.Fprintf(file, "表扫描情况: \n")
+		fmt.Fprintf(file, "Table Name: %s\n", explainResult.QueryBlock.Table.TableName)
+		fmt.Fprintf(file, "访问类型 Access Type: %s\n", explainResult.QueryBlock.Table.AccessType)
+		fmt.Fprintf(file, "扫描的行数 Rows Examined Per Scan: %d\n", explainResult.QueryBlock.Table.RowsExaminedPerScan)
+		fmt.Fprintf(file, "生产的行数 Rows Produced Per Join: %d\n", explainResult.QueryBlock.Table.RowsProducedPerJoin)
+		fmt.Fprintf(file, "过滤的百分比 Filtered: %s\n", explainResult.QueryBlock.Table.Filtered)
 
 		// 成本消耗
-		fmt.Println("----------------------------")
-		fmt.Println("Cost Info:")
-		fmt.Printf("读取消耗ms Read Cost: %s\n", explainResult.QueryBlock.Table.CostInfo.ReadCost)
-		fmt.Printf("执行消耗 Eval Cost: %s\n", explainResult.QueryBlock.Table.CostInfo.EvalCost)
-		fmt.Printf("预消耗 Prefix Cost: %s\n", explainResult.QueryBlock.Table.CostInfo.PrefixCost)
-		fmt.Printf("数据读取/join Data Read Per Join: %s\n", explainResult.QueryBlock.Table.CostInfo.DataReadPerJoin)
+		fmt.Fprintf(file, "---------------------------- \n")
+		fmt.Fprintf(file, "Cost Info: \n")
+		fmt.Fprintf(file, "读取消耗ms Read Cost: %s\n", explainResult.QueryBlock.Table.CostInfo.ReadCost)
+		fmt.Fprintf(file, "执行消耗 Eval Cost: %s\n", explainResult.QueryBlock.Table.CostInfo.EvalCost)
+		fmt.Fprintf(file, "预消耗 Prefix Cost: %s\n", explainResult.QueryBlock.Table.CostInfo.PrefixCost)
+		fmt.Fprintf(
+			file,
+			"数据读取/join Data Read Per Join: %s\n",
+			explainResult.QueryBlock.Table.CostInfo.DataReadPerJoin,
+		)
 
 		// 解释需要优化的点
 		switch explainResult.QueryBlock.Table.AccessType {
 		case "ALL":
-			fmt.Println("访问类型为 ALL，全表扫描. 如果非必须, 需要索引。")
+			fmt.Fprintf(file, "访问类型为 ALL，全表扫描. 如果非必须, 需要索引。")
 		case "index":
-			fmt.Println("访问类型为 index，索引扫描. 可以再优化")
+			fmt.Fprintf(file, "访问类型为 index，索引扫描. 可以再优化")
 		case "range":
-			fmt.Println("访问类型为 range，范围扫描. 可以考虑添加更适合的索引以提升性能。")
+			fmt.Fprintf(file, "访问类型为 range，范围扫描. 可以考虑添加更适合的索引以提升性能。")
 		case "ref":
-			fmt.Println("访问类型为 ref，唯一索引查找. 使用非唯一性索引或唯一性索引查找匹配的数据行. 基本不需要优化.")
+			fmt.Fprintf(
+				file,
+				"访问类型为 ref，唯一索引查找. 使用非唯一性索引或唯一性索引查找匹配的数据行. 基本不需要优化.",
+			)
 		case "const":
-			fmt.Println("访问类型为 const，常量查找 by primary key/unique key. 针对性一条条找. 已经是最优访问方式，无需优化。")
+			fmt.Fprintf(
+				file,
+				"访问类型为 const，常量查找 by primary key/unique key. 针对性一条条找. 已经是最优访问方式，无需优化。",
+			)
 		case "unique_subquery":
-			fmt.Println("访问类型为 unique_subquery，唯一子查询. 在子查询中使用了唯一索引来查找匹配的数据行. 建议 join 优化掉子查询")
+			fmt.Fprintf(
+				file,
+				"访问类型为 unique_subquery，唯一子查询. 在子查询中使用了唯一索引来查找匹配的数据行. 建议 join 优化掉子查询",
+			)
 		case "index_subquery":
-			fmt.Println("访问类型为 index_subquery，在子查询中使用了非唯一性索引来查找匹配的数据行. 建议 join 优化")
+			fmt.Fprintf(
+				file,
+				"访问类型为 index_subquery，在子查询中使用了非唯一性索引来查找匹配的数据行. 建议 join 优化",
+			)
 
 		default:
-			fmt.Println("未知的访问类型，可以进一步分析执行计划并优化查询。")
+			fmt.Fprintf(file, "未知的访问类型，可以进一步分析执行计划并优化查询。")
 		}
 
-		//
 		if explainResult.QueryBlock.Table.RowsExaminedPerScan > 1000 {
-			fmt.Println("扫描的行数较多，可能需要优化查询或添加索引。")
+			fmt.Fprintf(file, "扫描的行数较多，可能需要优化查询或添加索引。")
 		}
 
-		fmt.Println("----------------------------")
-		fmt.Println("Used Columns:")
+		fmt.Fprintf(file, "\n----------------------------")
+		fmt.Fprintf(file, "\nUsed Columns:")
 		for _, col := range explainResult.QueryBlock.Table.UsedColumns {
-			fmt.Println(col)
+			fmt.Fprintf(file, "\n - %s", col)
 		}
 
-		fmt.Println("\n============================\n ")
-
+		fmt.Fprintf(file, "\n\n ")
+		fmt.Fprintf(file, "\n============================\n ")
+		fmt.Fprintf(file, "\n\n ")
 	}
 
-	// 可以根据需要添加更多优化点的判断逻辑
 }
