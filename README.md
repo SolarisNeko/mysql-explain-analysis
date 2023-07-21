@@ -5,11 +5,11 @@
 # config
 读取当前目录下的以下文件
 input : 
-1. 配置 `check.sql` 需要检查的 Select SQL
-2. 配置 `mysql-connect.json` 的 Mysql 连接参数
+1. 配置 `./check.sql` 需要检查的 Select SQL
+2. 配置 `./mysql-connect.json` 的 Mysql 连接参数
 
 output:
-1. 输出 `mysql`
+1. 输出 `mysql-analysis-output.txt` 分析报告
 
 # Output 分析解析
 ```txt
