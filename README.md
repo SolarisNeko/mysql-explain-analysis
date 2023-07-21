@@ -3,9 +3,13 @@
 自动分析多条 SQL 执行计划是否需要进行优化
 
 # config
-
+读取当前目录下的以下文件
+input : 
 1. 配置 `check.sql` 需要检查的 Select SQL
 2. 配置 `mysql-connect.json` 的 Mysql 连接参数
+
+output:
+1. 输出 `mysql`
 
 # Output 分析解析
 ```txt
